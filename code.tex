@@ -1,0 +1,429 @@
+\section{Python code}
+\label{sec:app}
+\begin{lstlisting}[language=Python]
+
+# import the libraries
+
+import pandas as pd
+import yfinance as yf
+import numpy as np
+import talib as ta
+import plotly.express as px
+from plotly.subplots import make_subplots
+from scipy import stats
+
+from sklearn.utils import resample
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.model_selection import GridSearchCV
+from sklearn.naive_bayes import GaussianNB
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.svm import SVC
+from sklearn.metrics import precision_score, recall_score, accuracy_score, f1_score, roc_auc_score
+
+
+# functions for data preprocessing
+
+def get_data(symbol):
+    df = yf.download(symbol, start="1993-01-01", end="2024-01-31")
+    df = df.sort_index(ascending=True)
+    df.columns = [col.lower() for col in df.columns]
+    df = df.drop(columns=['adj close']) 
+
+    return df
+
+def has_missing_values(df):
+    return df.isnull().values.any()
+
+# functions for data labeling
+
+def calculate_price_change(df, d):
+    df['change'] = df['close'].pct_change(periods=d).shift(-d)
+    return df
+
+def calculate_label(df):
+    df['label'] = np.where(df['change'] > 0, 1, 0)
+    return df
+
+# functions for technical indicator calculation
+
+def calculate_technical_indicators(df, input_window):
+    df['sma'] = ta.SMA(df['close'], timeperiod=input_window)
+    df['wma'] = ta.WMA(df['close'], timeperiod=input_window)
+    df['mom'] = ta.MOM(df['close'], timeperiod=input_window)
+    df['stochk'], df['stochd'] = ta.STOCH(df['high'], df['low'], df['close'], fastk_period=14, slowk_period=3, slowd_period=3)
+    df['rsi'] = ta.RSI(df['close'], timeperiod=input_window)
+    df['macd'], _, _ = ta.MACD(df['close'])
+    df['willr'] = ta.WILLR(df['high'], df['low'], df['close'], timeperiod=input_window)
+    df['adosci'] = ta.ADOSC(df['high'], df['low'], df['close'], df['volume'], fastperiod=3, slowperiod=10)
+    df['cci'] = ta.CCI(df['high'], df['low'], df['close'], timeperiod=input_window)
+    return df
+
+def calculate_trend_deterministic(df):
+    df['sma'] = np.where(df['close'] > df['sma'], 1, -1)
+    df['wma'] = np.where(df['close'] > df['wma'], 1, -1)
+    df['mom'] = np.where(df['mom']>0, 1, -1)
+    df['stochk'] = np.where(df['stochk'] > df['stochk'].shift(-1), 1, -1)
+    df['stochd'] = np.where(df['stochd'] > df['stochd'].shift(-1), 1, -1)
+    df['rsi'] = np.where(df['rsi'] > 70, -1, np.where(df['rsi'] < 30, 1, np.where(df['rsi'] < df['rsi'].shift(1), 1, -1)))
+    df['macd'] = np.where(df['macd'] < df['macd'].shift(-1), 1, -1)
+    df['willr'] = np.where(df['willr'] > df['willr'].shift(-1), 1, -1)
+    df['adosci'] = np.where(df['adosci'] > df['adosci'].shift(-1), 1, -1)
+    df['cci'] = np.where(df['cci'] > 200, -1, np.where(df['cci'] < -200, 1, np.where(df['cci'] < df['cci'].shift(1), 1, -1)))
+    return df
+
+indicators = ['sma', 'wma', 'mom', 'stochk', 'stochd', 'rsi', 'macd', 'willr', 'adosci', 'cci']
+    
+# indicator scaling
+
+def scale_indicators(df):
+    scaler = MinMaxScaler(feature_range=(-1, 1))
+    df[indicators] = scaler.fit_transform(df[indicators])
+    return df
+
+# functions for sampling
+
+def split_data(df, split_ratio):
+    split_index = int(len(df) * split_ratio)
+    
+    train_df = df.iloc[:split_index]
+    test_df = df.iloc[split_index:]
+    change_test_df = test_df['change']
+    
+    return train_df, test_df, change_test_df
+
+def rebalance_data(df):
+    train_samples = []
+
+    class_1 = df[df['label'] == 1]
+    class_2 = df[df['label'] == 0]
+
+    min_samples = min(len(class_1), len(class_2))
+
+    if min_samples > 0:
+        class_1_downsampled = resample(class_1, replace=False, n_samples=min_samples, random_state=42)
+        class_2_downsampled = resample(class_2, replace=False, n_samples=min_samples, random_state=42)
+        temp = pd.concat([class_1_downsampled, class_2_downsampled])
+        train_samples.append(temp)
+
+    train_df = pd.concat(train_samples)
+    train_df = train_df.sort_index(ascending=True)
+
+    return train_df
+
+# helper functions for metrics
+
+def print_metrics(y_test, y_pred):
+    global metrics_df
+    precision_pos = round(precision_score(y_test, y_pred, pos_label=1), 2)
+    precision_neg = round(precision_score(y_test, y_pred, pos_label=0), 2)
+    recall_pos = round(recall_score(y_test, y_pred, pos_label=1), 2)
+    recall_neg = round(recall_score(y_test, y_pred, pos_label=0), 2)
+    accuracy = round(accuracy_score(y_test, y_pred), 2)
+    f_score = round(f1_score(y_test, y_pred), 2)
+    roc = round(roc_auc_score(y_test, y_pred), 2)
+    
+    metrics = {
+        'Precision Positive': precision_pos,
+        'Precision Negative': precision_neg,
+        'Recall Positive': recall_pos,
+        'Recall Negative': recall_neg,
+        'Accuracy': accuracy,
+        'F-score': f_score,
+        'ROC AUC': roc
+    }
+
+    for key, value in metrics.items():
+        metrics_df.at[metrics_df.index[-1], key] = value
+
+def evaluate_profit(y_test, change_test_df, y_pred):
+    df = y_test.copy()
+    df = pd.DataFrame(df, columns=['label'])
+    df['change'] = change_test_df
+    df['prediction'] = y_pred
+
+    df['result'] = np.where(df['prediction'] == df['label'],
+                            abs(df['change']),
+                            -abs(df['change']))
+    
+    metrics = {
+        'Average Return': df['result'].mean(),
+        'Std Return': df['result'].std(),
+    }
+
+    for key, value in metrics.items():
+        metrics_df.at[metrics_df.index[-1], key] = value
+    
+
+# function for fit NB
+
+def fit_nb(X_train, y_train, X_test, y_test, change_test_df):
+    param_grid = {
+        'var_smoothing': np.logspace(0, -9, num=100)
+    }
+
+    gnb = GaussianNB()
+    nb_grid = GridSearchCV(estimator=gnb, param_grid=param_grid, verbose=1, cv=5, scoring='accuracy', n_jobs=-1)
+
+    nb_grid.fit(X_train, y_train)
+
+    metrics = {
+        'Best Parameters': nb_grid.best_params_,
+        'Best Accuracy': nb_grid.best_score_
+    }
+
+    for key, value in metrics.items():
+        metrics_df.at[metrics_df.index[-1], key] = value
+
+    best_gnb = nb_grid.best_estimator_
+    y_pred = best_gnb.predict(X_test)
+
+    print_metrics(y_test, y_pred)
+    evaluate_profit(y_test, change_test_df, y_pred)
+
+# function for fit RF
+
+def fit_rf(X_train, y_train, X_test, y_test, change_test_df):
+    n_estimators = [int(x) for x in np.linspace(start=10, stop=200, num=6)]
+    max_features = [3]
+    max_depth = [int(x) for x in np.linspace(10, 100, num=4)]
+    max_depth.append(None)
+    min_samples_split = [2, 4, 8]
+    bootstrap = [True]
+
+    param_grid = {
+        'n_estimators': n_estimators,
+        'max_features': max_features,
+        'max_depth': max_depth,
+        'min_samples_split': min_samples_split,
+        'bootstrap': bootstrap
+    }
+
+    rf = RandomForestClassifier(random_state=42)
+    rf_grid = GridSearchCV(estimator=rf, param_grid=param_grid, cv=5, scoring='accuracy', n_jobs=-1)
+
+    rf_grid.fit(X_train, y_train)
+
+    metrics = {
+        'Best Parameters': rf_grid.best_params_,
+        'Best Accuracy': rf_grid.best_score_
+    }
+
+    metrics = {f"{key}": value for key, value in metrics.items()}
+
+    for key, value in metrics.items():
+        metrics_df.at[metrics_df.index[-1], key] = value
+
+    best_rf = rf_grid.best_estimator_
+    y_pred = best_rf.predict(X_test)
+
+    print_metrics(y_test, y_pred)
+    evaluate_profit(y_test, change_test_df, y_pred)
+
+#function for fit svm
+
+def fit_svc(X_train, y_train, X_test, y_test, change_test_df, symbol):
+    param_grid = {
+        'C': [0.1, 1, 10, 100, 1000],
+        'gamma': [1, 0.1, 0.01, 0.001, 0.0001],
+        'kernel': ['rbf', 'sigmoid']
+    }
+
+    svc = SVC()
+    svc_grid = GridSearchCV(svc, param_grid, refit=True, verbose=1, scoring='accuracy', n_jobs=-1, cv =5)
+
+    svc_grid.fit(X_train, y_train)
+
+    best_svc = svc_grid.best_estimator_
+
+    y_pred = best_svc.predict(X_test)
+
+    metrics = {
+        'Best Parameters': svc_grid.best_params_,
+        'Best Accuracy': svc_grid.best_score_
+    }
+
+    metrics = {f"{key}": value for key, value in metrics.items()}
+
+    for key, value in metrics.items():
+        metrics_df.at[metrics_df.index[-1], key] = value
+
+    print_metrics(y_test, y_pred)
+    evaluate_profit(y_test, change_test_df, y_pred)
+
+# function for creating boxplots
+
+def create_boxplots():
+    nb = pd.read_csv("metrics_nb_new.csv")
+    rf = pd.read_csv("metrics_rf_new.csv")
+    svm = pd.read_csv("metrics_svm_new.csv")
+
+    nb = nb[nb['discrete'] == True]
+    rf = rf[rf['discrete'] == True]
+    svm = svm[svm['discrete'] == True]
+
+
+    day_mapping = {0: 'Mon', 1: 'Tue', 2: 'Wed', 3: 'Thu', 4: 'Fri', 5: 'Saturday', 6: 'Sunday'}
+    for df in [nb, rf, svm]:
+        df['day_of_week'] = df['day_of_week'].map(day_mapping)
+
+
+    fig = make_subplots(rows=1, cols=3, subplot_titles=("Naive-Bayes", "Random Forest", "SVM"))
+
+
+    dataframes = [nb, rf, svm]
+    titles = ["Naive-Bayes", "Random Forest", "SVM"]
+
+
+    for i, df in enumerate(dataframes, start=1):
+        df['sharp_ratio'] = df['Average Return'] / df['Std Return']
+
+
+        fig_single = px.box(df, x='day_of_week', y='F-score', title=titles[i-1])
+        for trace in fig_single.data:
+            fig.add_trace(trace, row=1, col=i)
+
+    fig.update_layout(
+        font=dict(size=22),
+        showlegend=False
+    )
+
+    for annotation in fig['layout']['annotations']:
+        annotation['font'] = dict(size=30)
+
+    fig.show()
+
+# function to create ttest
+
+def create_ttest():
+    nb = pd.read_csv("metrics_nb_new.csv")
+    rf = pd.read_csv("metrics_rf_new.csv")
+    svm = pd.read_csv("metrics_svm_new.csv")
+
+    dataframes = {'Naive-Bayes': nb, 'Random Forest': rf, 'SVM': svm}
+
+    for name, df in dataframes.items():
+        discrete_group = df[df['discrete'] == True]['Accuracy']
+        continuous_group = df[df['discrete'] == False]['Accuracy']
+        
+        t_stat, p_value = stats.ttest_ind(discrete_group, continuous_group)
+        
+        t_stat = round(t_stat, 2)
+        p_value = p_value
+        
+        print(f"{name} - T-statistic: {t_stat}, P-value: {p_value}")
+
+# function for creating cumulative return plot
+
+def create_cum_return_plot():
+    df = pd.read_csv('svm_predictions.csv')
+
+    symbols = [
+        "AJG", "AOS", "BA", "AXP", "BBY", "BKNG", "CMI", "CVX", "CSX", "DIS",
+        "DUK", "EBAY", "ECL", "FMC", "GIS", "GL", "HOLX", "HUM", "IBM", "IEX",
+        "INTC", "IPG", "JBHT", "JPM", "KMB", "KO", "MAR", "MCD", "MNST", "NKE", 
+        "OKE", "PAYX", "POOL", "RL", "SLB", "T", "WAT", "URI", "TRV", "AAPL", 
+        "BAC", "CSCO", "NVDA", "WMT", "LUV", "PTC", "SBUX", "WY", "GE", "STE"
+    ]
+
+
+    cum_returns_df = pd.DataFrame()
+
+    for symbol in symbols:
+        df[symbol + '_return'] = np.where(df[symbol] == df[symbol + '_label'], 
+                                        abs(df[symbol + '_change']*100), 
+                                        -abs(df[symbol + '_change']*100))
+        df[symbol + '_cum_return'] = df[symbol + '_return'].cumsum()
+        cum_returns_df[symbol] = df[symbol + '_cum_return']
+
+    melted_df = cum_returns_df.reset_index().melt(id_vars='index', var_name='Symbol', value_name='Cumulative Return')
+
+    fig = px.line(melted_df, x='index', y='Cumulative Return', color='Symbol', title='Cumulative Returns of Symbols')
+
+
+    fig.update_layout(
+        title=None,
+        xaxis_title='Week',
+        yaxis_title='Cumulative Return (%)',
+        font=dict(size=22),
+        showlegend=False
+    )
+
+    fig.show()
+    
+# main loop
+
+columns = ['Precision Positive', 'Precision Negative', 'Recall Positive', 'Recall Negative',
+           'Accuracy', 'F-score', 'ROC AUC', 'Best Parameters', 'Best Accuracy', 'Average Return', 'Std Return']
+metrics_df = pd.DataFrame(columns=columns)
+
+symbols = [
+    "AJG", "AOS", "BA", "AXP", "BBY", "BKNG", "CMI", "CVX", "CSX", "DIS",
+    "DUK", "EBAY", "ECL", "FMC", "GIS", "GL", "HOLX", "HUM", "IBM", "IEX",
+    "INTC", "IPG", "JBHT", "JPM", "KMB", "KO", "MAR", "MCD", "MNST", "NKE", 
+    "OKE", "PAYX", "POOL", "RL", "SLB", "T", "WAT", "URI", "TRV", "AAPL", 
+    "BAC", "CSCO", "NVDA", "WMT", "LUV", "PTC", "SBUX", "WY", "GE", "STE"
+]
+
+
+days_of_week = range(5)
+
+
+for symbol in symbols:
+    print(f">>> Processing {symbol}...")
+    for day_of_week in days_of_week:
+        for is_discrete in [True, False]:
+
+            df = get_data(symbol)
+
+            metrics = {'ticker': symbol, 'day_of_week': 2, 'discrete': True}
+    
+            if has_missing_values(df) or len(df) < 10:
+                metrics['missing'] = 'YES'
+                continue
+            else:
+                pass
+
+            forecast_window, input_window = 5, 5
+
+            df = calculate_price_change(df, forecast_window)
+            df = calculate_technical_indicators(df, input_window)
+
+            if not is_discrete:
+                df = scale_indicators(df)
+            else:
+                df = calculate_trend_deterministic(df)
+
+            df = calculate_label(df)
+            df = df[(df.index >= '2004-01-01') & (df.index <= '2023-12-31')]
+
+            df = df[df.index.dayofweek == 2]
+
+            train_df, test_df, change_test_df = split_data(df, 0.8)
+            train_df = rebalance_data(train_df)
+
+            X_train, X_test = train_df[indicators], test_df[indicators]
+            y_train, y_test = train_df['label'], test_df['label']
+
+            metrics['Portion of Positive changes'] = len(y_train[y_train == 1]) / len(y_train)
+            metrics['X_train_size'] = len(X_train)
+            metrics['X_test_size'] = len(X_test)
+            metrics['y_train_size'] = len(y_train)
+            metrics['y_test_size'] = len(y_test)
+
+            metrics_df = pd.concat([metrics_df, pd.DataFrame([metrics])], ignore_index=True)
+
+            fit_nb(X_train, y_train, X_test, y_test, change_test_df)
+            fit_rf(X_train, y_train, X_test, y_test, change_test_df)
+            fit_svc(X_train, y_train, X_test, y_test, change_test_df, symbol)
+
+            pandas_df = pd.read_csv('svm_predictions.csv')
+            
+            pandas_df[symbol + '_change'] = change_test_df.values
+            pandas_df[symbol + '_label'] = y_test.values
+            pandas_df.to_csv('svm_predictions.csv', index=False)
+
+
+metrics_df.to_csv('metrics.csv', index=False)
+
+
+\end{lstlisting}

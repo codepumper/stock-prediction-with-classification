@@ -1,0 +1,18 @@
+\begin{table*}[h]
+    \centering
+    \caption{Random Forest Algorithm}
+    \label{tab:table6}
+    \begin{tabular}{@{}ll@{}}
+    \hline
+    \textbf{Step} & \textbf{Description} \\ 
+    \hline
+    1 & \textbf{Input:} Training set $D$, number of trees in the ensemble $k$ \\
+    2 & \quad \textbf{for} $i = 1$ to $k$ \textbf{do} \\
+    3 & \quad \quad Create bootstrap sample $D_i$ by sampling $D$ with replacement \\
+    4 & \quad \quad Select 3 features randomly \\
+    5 & \quad \quad Use $D_i$ and randomly selected three features to derive tree $M_i$ \\
+    6 & \quad \textbf{end for} \\
+    7 & \textbf{Output:} A composite model $M$ \\
+    \hline
+    \end{tabular}
+\end{table*}

@@ -1,0 +1,38 @@
+\begin{table*}[h]
+\centering
+\caption{Selected Technical Indicator Formulas \cite{Kara2011}}
+\label{tab:table4}
+\begingroup
+\setlength{\tabcolsep}{10pt}
+\renewcommand{\arraystretch}{2}%
+\begin{tabular}{ll} %\begin{tabular}{m{5cm} m{9cm}}
+\hline
+\textbf{Name of Indicator}
+& \textbf{Formula}                                              \\ \hline
+Simple $n$-day Moving Average
+& $\frac{C_t + C_{t-1} + ... + C_{t-9}}{n}$                     \\ 
+Weighted $n$-day Moving Average
+& $\frac{(10)C_t + (9)C_{t-1} + ... + C_{t-9}}{n + (n-1) + ... + 1}$
+\\ 
+Momentum
+& $C_t - C_{t-9}$                                               \\ 
+Stochastic K\%
+& $\frac{C_t - LL_t}{HH_t - LL_t} \times 100$                   \\ 
+Stochastic D\%
+& $\frac{\sum_{i=0}^{n-1} K_{t-i}}{10}$                         \\ 
+Relative Strength Index (RSI)
+& $100 - \frac{100}{1 + \left(\sum_{i=0}^{n-1} UP_{t-i}/n\right)/\left(\sum_{i=0}^{n-1} DW_{t-i}/n\right)}$
+
+\\ 
+Moving Average Convergence Divergence (MACD) 
+& $\frac{MACD(n)_{t-1} + 2}{n+1} \times (DIFF_t - MACD(n)_{t-1})$
+\\ 
+Larry William’s R\%
+& $\frac{H_n - C_t}{H_n - L_n} \times 100$                      \\ 
+A/D (Accumulation/Distribution) Oscillator
+& $\frac{H_t - C_{t-1}}{H_t - L_t}$                             \\ 
+CCI (Commodity Channel Index)
+& $\frac{M_t - SM_t}{0.015D_t}$                                 \\ \hline
+\end{tabular}
+\endgroup
+\end{table*}

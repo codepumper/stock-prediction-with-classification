@@ -1,1 +1,9 @@
-# stock-prediction-with-classification
+# Forecasting Stock Price Movements Using Classification Methods
+
+## Introduction
+
+This thesis explores the application of machine learning models—Support Vector Machines (SVM), Random Forest, and Gaussian Naive Bayes—for predicting stock price movements. Using data from 50 randomly selected S&P 500 components spanning 20 years (2004–2023), the study employs both continuous and discrete representations of technical indicators as input features. The models are evaluated based on classification metrics (accuracy, precision, recall, F1 score) and financial metrics (average return, Sharpe ratio). SVM models, leveraging a trend-deterministic approach and a 5-day forecast window, showed the highest profitability despite Random Forest achieving better overall classification accuracy. The study highlights the potential of machine learning in financial forecasting while acknowledging market complexities.
+
+## Conclusion
+
+The research demonstrates the effectiveness of machine learning models in predicting stock price movements, with SVM emerging as the most profitable model for high-volatility scenarios. Random Forest models performed better in classification tasks but fell short in financial metrics. These results emphasize the value of combining machine learning with technical indicators for stock market forecasting. However, the study underscores the limitations of these models in capturing external market influences and suggests integrating additional data sources, such as fundamental and sentiment analysis, for improved predictive performance. The findings pave the way for more robust frameworks in financial forecasting.
